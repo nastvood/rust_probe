@@ -17,13 +17,39 @@ pub trait ToBytes {
     fn to_bytes(self, endian: Endian) -> Box<[u8]>;
 }
 
-pub trait FromBytes<T> {
-    fn from_bytes(endian: Endian, s: &[u8]) -> T;
+pub trait FromBytes {
+    fn from_bytes(endian: Endian, s: &[u8]) -> Self;
+}
+
+pub trait ProtoWriter {
+    fn proto_write(&self, buf: &mut Buffer);
+}
+
+pub trait ProtoReader {
+    fn proto_read(&self, buf: &mut Buffer) -> Self;
 }
 
 impl ToBytes for u8 {
     fn to_bytes(self, _endian: Endian) -> Box<[u8]> {
         Box::new([self]) 
+    }
+}
+
+impl ToBytes for i8 {
+    fn to_bytes(self, _endian: Endian) -> Box<[u8]> {
+        Box::new([self as u8]) 
+    }
+}
+
+impl ToBytes for bool {
+    fn to_bytes(self, _endian: Endian) -> Box<[u8]> {
+        Box::new([if self {1}  else {0}]) 
+    }
+}
+
+impl ToBytes for () {
+    fn to_bytes(self, _endian: Endian) -> Box<[u8]> {
+        Box::new([1]) 
     }
 }
 
@@ -34,7 +60,7 @@ impl ToBytes for &str {
 }
 
 macro_rules! impl_ToBytes {
-    (for $($t:ty), +) => {
+    ($($t:ty), +) => {
         $(impl ToBytes for $t {
             fn to_bytes(self, endian: Endian) -> Box<[u8]> {
                 if endian == Endian::BigEndian {
@@ -47,17 +73,33 @@ macro_rules! impl_ToBytes {
     }
 }
 
-impl_ToBytes! (for u16, u32, u64, usize, f64);
-
-impl FromBytes<u8> for u8 {
-    fn from_bytes(_endian: Endian, s: &[u8]) -> u8 {
+impl FromBytes for u8 {
+    fn from_bytes(_endian: Endian, s: &[u8]) -> Self {
         s[0]
     }
 }
 
+impl FromBytes for i8 {
+    fn from_bytes(_endian: Endian, s: &[u8]) -> Self {
+        s[0] as i8
+    }
+}
+
+impl FromBytes for bool {
+    fn from_bytes(_endian: Endian, s: &[u8]) -> Self {
+        if s[0] == 0 {false} else {true}
+    }
+}
+
+impl FromBytes for () {
+    fn from_bytes(_endian: Endian, _s: &[u8]) -> Self {
+        ()
+    }
+}
+
 macro_rules! impl_FromBytes {
-    (for $($t:ty), +) => {
-        $(impl FromBytes<Self> for $t {
+    ($($t:ty), +) => {
+        $(impl FromBytes for $t {
             fn from_bytes(endian: Endian, s: &[u8]) -> Self {
                 if endian == Endian::BigEndian {            
                     Self::from_be_bytes(s.try_into().unwrap())
@@ -69,7 +111,8 @@ macro_rules! impl_FromBytes {
     }
 }
 
-impl_FromBytes! (for u16, u32, u64, usize, f64);
+impl_ToBytes! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
+impl_FromBytes! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
 
 impl Buffer {
 
@@ -95,7 +138,7 @@ impl Buffer {
         self.write_slice_u8(&bytes);
     }
 
-    pub fn read<T:FromBytes<T>>(&mut self) -> T {
+    pub fn read<T:FromBytes>(&mut self) -> T {
        T::from_bytes(self.endian, self.read_slice_u8(std::mem::size_of::<T>())) 
     }
 
@@ -147,6 +190,8 @@ impl Buffer {
             if add_len > 0 {
                 self.data.set_len(self.pos + add_len);
             }
+
+            self.pos += str_len; 
         }
     }
 
@@ -166,7 +211,7 @@ impl Buffer {
     }
 
 
-    pub fn read_vec<T:FromBytes<T> + Copy>(&mut self) -> Vec<T> {
+    pub fn read_vec<T:FromBytes + Copy>(&mut self) -> Vec<T> {
         let len = self.read::<usize>();
         let mut v = Vec::with_capacity(len);
         
@@ -176,15 +221,6 @@ impl Buffer {
 
         v
     }
-
-    /*pub fn write_elems<T>(&mut self, xs: &[T], writer: &dyn Fn(&T) -> ()) {
-        self.write::<usize>(xs.len());
-        
-        for x in xs.iter() {
-            writer(x);
-        }
-    }*/
-
 }
 
 //cargo test -- --nocapture
@@ -193,6 +229,50 @@ impl Buffer {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[derive(Debug, PartialEq)]
+    struct User {
+        name: String,
+        email: String, 
+        age: u8    
+    }
+
+    impl User {
+        fn proto_writer(&self, buf:&mut Buffer) {
+            buf.write_utf8(&self.name);
+            buf.write_utf8(&self.email);
+            buf.write::<u8>(self.age)
+        }
+
+        fn proto_reader(buf:&mut Buffer) -> Self {
+            let name = String::from(buf.read_utf8());
+            let email = String::from(buf.read_utf8());
+            let age = buf.read::<u8>();
+
+            return User {
+                name,
+                email,
+                age 
+            }
+        }
+    }
+
+    #[test]
+    fn user() {
+        let mut b = Buffer::new();
+        let user = User {
+            name: String::from("Den"), 
+            email: String::from("nastvood@gmail.com"), 
+            age: 37
+        };
+
+        user.proto_writer(&mut b);
+
+        b.pos = 0;
+        let readed_user = User::proto_reader(&mut b);
+        
+        assert_eq!(user, readed_user);
+    }
 
     #[test]
     fn measure() {
@@ -236,75 +316,46 @@ mod tests {
         assert_eq!(v, b.read_vec::<u8>());
     }
 
-    #[test]
-    fn simple() {
-        let mut b = Buffer::build_buffer(0, Endian::BigEndian);
-        b.write::<u32>(3201695);
-        b.write::<u64>(125863201695);
+    macro_rules! test_simple_type {
+        ($func_name:ident, $t:ty, data $v0:expr, $v1:expr, $v2:expr, mdata $offset:expr, $v:expr, $tm:ty, $last:expr) => (
+            #[test]
+            fn $func_name() {
+                let mut b = Buffer::new();
+                b.write::<$t>($v0);
+                b.write::<$t>($v1);
+                b.write::<$t>($v2);
 
-        //println!("{:?}", b);
+                b.pos = std::mem::size_of::<$t>();
 
-        b.pos = 0;
+                assert_eq!($v1, b.read::<$t>());
 
-        assert_eq!(3201695, b.read::<u32>());
-        assert_eq!(125863201695, b.read::<u64>());
+                b.pos = $offset;
+                b.write::<$t>($v);
 
-        //println!("{:?}", b);
+                //println!("{:?}", b);
 
-        //let s = String::from("Деннис");
-        //println!("{} {}", s, s.len());
+                b.pos = $offset;
+                assert_eq!($last, b.read::<$tm>());
+            }
+        )
     }
 
-    #[test]
-    fn f64() {
-        let mut b = Buffer::new();        
-        b.write::<f64>(-5682.5263);
-        b.pos = 0;
-        assert_eq!(-5682.5263, b.read::<f64>());
-    }
+    test_simple_type! (bool, bool, data true, false, false, mdata 1, true, u16, 256);
+    test_simple_type! (unit, (), data (), (), (), mdata 1, (), u16, 257);
 
-    #[test]
-    fn u8() {
-        let mut b = Buffer::new();
+    test_simple_type! (f64, f64, data 1.4242, -2.424, -3444., mdata 1, 10.23424, u16, 16420);
+    test_simple_type! (f32, f32, data 1.4242, -2.424, -3444., mdata 1, 10.23424, u16, 16675);
 
-        b.write::<u8>(1);
-        b.write::<u8>(4);
-        b.write::<u8>(3);
+    test_simple_type! (u8, u8, data 1, 2, 3, mdata 1, 10, u16, 2563);
+    test_simple_type! (u16, u16, data 623, 10326, 7596, mdata 2, 10, u32, 662956);
+    test_simple_type! (u32, u32, data 1462387564, 2423423, 344, mdata 10, 104324, u16, 1);
+    test_simple_type! (u64, u64, data 146327563875423464, 234214234423423, 14234242423, mdata 2, 142342424242424, u32, 33141);
 
-        assert_eq!(vec![1, 4, 3], b.data);
+    test_simple_type! (i8, i8, data 1, -2, -3, mdata 1, 10, i16, 2813);
+    test_simple_type! (i16, i16, data -1625, 2221, -25632, mdata 1, -10, u16, 65526);
+    test_simple_type! (i32, i32, data -1625, 2221, -25632, mdata 3, 10, i64, 45868908443);
+    test_simple_type! (i64, i64, data -1625, 2221, -25632, mdata 1, 4236876876786423424, i32, 986474770);
 
-        b.pos = 1;
-
-        b.write::<u8>(2);
-
-        assert_eq!(vec![1, 2, 3], b.data);
-
-        b.write::<u8>(5);
-
-        assert_eq!(vec![1, 2, 5], b.data);
-
-        b.pos = 2;
-        assert_eq!(5, b.read::<u8>());
-    }
-
-    #[test]
-    fn u16() {
-        let mut b = Buffer::new();
-
-        b.write::<u16>(623);
-        b.write::<u16>(10362);
-        b.write::<u16>(7596);
-
-        b.pos = 2;
-
-        assert_eq!(10362, b.read::<u16>());
-
-        b.pos = 4;
-        b.write::<u8>(10);
-        b.pos = 4;
-        assert_eq!(2732, b.read::<u16>());
-
-    }
 
     #[test]
     fn str() {
@@ -313,7 +364,6 @@ mod tests {
         b.write_utf8("[DIY家具] 収納椅子をつくる");
         b.pos = 0;
 
-        //println!("{:?}", b);
         assert_eq!("[DIY家具] 収納椅子をつくる", b.read_utf8());
 
         b.pos = 11 + std::mem::size_of::<usize>();
