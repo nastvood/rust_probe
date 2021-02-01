@@ -1,0 +1,11 @@
+[package]
+name = "proto_buffer_test"
+version = "0.1.0"
+authors = ["Agapiy Denis <nastvood@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+proto_buffer = { path = "../" }
+proto_buffer_derive = { path = "../proto_buffer_derive" }

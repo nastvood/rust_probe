@@ -9,8 +9,8 @@ pub enum Endian {
 #[derive(Debug)]
 pub struct Buffer {
     data: Vec<u8>,
-    pos: usize,
-    endian: Endian,
+    pub pos: usize,
+    pub endian: Endian,
 }
 
 pub trait ToBytes {
@@ -86,6 +86,12 @@ impl ProtoWriter for () {
 } 
 
 impl ProtoWriter for &str {
+    fn proto_write(&self, buf: &mut Buffer) {
+        buf.write_utf8(self);
+    }
+} 
+
+impl ProtoWriter for String {
     fn proto_write(&self, buf: &mut Buffer) {
         buf.write_utf8(self);
     }
@@ -349,27 +355,20 @@ mod tests {
         age: u8    
     }
 
-    impl User {
-    }
-
     impl ProtoWriter for User {
         fn proto_write(&self, buf:&mut Buffer) {
-            buf.write_utf8(&self.name);
-            buf.write_utf8(&self.email);
-            buf.write::<u8>(self.age)
+            self.name.proto_write(buf);
+            self.email.proto_write(buf);
+            self.age.proto_write(buf);
         }
     }
 
     impl ProtoReader for User {
         fn proto_read(buf:&mut Buffer) -> Self {
-            let name = String::proto_read(buf);
-            let email = String::proto_read(buf);
-            let age = u8::proto_read(buf);
-
             return User {
-                name,
-                email,
-                age 
+                name: String::proto_read(buf),
+                email: String::proto_read(buf),
+                age: u8::proto_read(buf)
             }
         }
     }
