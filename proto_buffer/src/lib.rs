@@ -26,7 +26,7 @@ pub trait ProtoWriter {
 }
 
 pub trait ProtoReader {
-    fn proto_read(&self, buf: &mut Buffer) -> Self;
+    fn proto_read(buf: &mut Buffer) -> Self;
 }
 
 impl ToBytes for u8 {
@@ -59,6 +59,38 @@ impl ToBytes for &str {
     }
 }
 
+impl ProtoWriter for u8 {
+    fn proto_write(&self, buf: &mut Buffer) {
+       buf.write_u8(self);
+    }
+} 
+
+impl ProtoWriter for i8 {
+    fn proto_write(&self, buf: &mut Buffer) {
+       let u = *self as u8;
+       buf.write_u8(&u);
+    }
+} 
+
+impl ProtoWriter for bool {
+    fn proto_write(&self, buf: &mut Buffer) {
+       let u = if *self {1} else {0};
+       buf.write_u8(&u);
+    }
+} 
+
+impl ProtoWriter for () {
+    fn proto_write(&self, buf: &mut Buffer) {
+       buf.write_u8(&1);
+    }
+} 
+
+impl ProtoWriter for &str {
+    fn proto_write(&self, buf: &mut Buffer) {
+        buf.write_utf8(self);
+    }
+} 
+
 macro_rules! impl_ToBytes {
     ($($t:ty), +) => {
         $(impl ToBytes for $t {
@@ -66,7 +98,21 @@ macro_rules! impl_ToBytes {
                 if endian == Endian::BigEndian {
                     Box::new(self.to_be_bytes()) 
                 } else {
-                    Box::new(self.to_be_bytes()) 
+                    Box::new(self.to_le_bytes()) 
+                }
+            }
+        })*
+    }
+}
+
+macro_rules! impl_ProtoWrite {
+    ($($t:ty), +) => {
+        $(impl ProtoWriter for $t {
+            fn proto_write(&self, buf:&mut Buffer) {
+                if buf.endian == Endian::BigEndian {
+                    buf.write_slice_u8(&self.to_be_bytes()) 
+                } else {
+                    buf.write_slice_u8(&self.to_le_bytes()) 
                 }
             }
         })*
@@ -97,6 +143,32 @@ impl FromBytes for () {
     }
 }
 
+impl ProtoReader for u8 {
+    fn proto_read(buf: &mut Buffer) -> Self {
+        buf.read_u8()
+    }
+}
+
+impl ProtoReader for i8 {
+    fn proto_read(buf: &mut Buffer) -> Self {
+        buf.read_u8() as i8
+    }
+}
+
+impl ProtoReader for bool {
+    fn proto_read(buf: &mut Buffer) -> Self {
+        if buf.read_u8() == 0 {false} else {true}
+    }
+}
+
+impl ProtoReader for () {
+    fn proto_read(buf: &mut Buffer) -> Self {
+        let _ = buf.read_u8();
+        ()
+    }
+}
+
+
 macro_rules! impl_FromBytes {
     ($($t:ty), +) => {
         $(impl FromBytes for $t {
@@ -111,8 +183,31 @@ macro_rules! impl_FromBytes {
     }
 }
 
+macro_rules! impl_ProtoReader {
+    ($($t:ty), +) => {
+        $(impl ProtoReader for $t {
+            fn proto_read(buf:&mut Buffer) -> Self {
+                if buf.endian == Endian::BigEndian {            
+                    Self::from_be_bytes(buf.read_slice_u8(std::mem::size_of::<Self>()).try_into().unwrap())
+                } else {
+                    Self::from_le_bytes(buf.read_slice_u8(std::mem::size_of::<Self>()).try_into().unwrap())
+                }
+            }
+        })*
+    }
+}
+
+impl_ProtoWrite! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
+impl_ProtoReader! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
+
 impl_ToBytes! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
 impl_FromBytes! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
+
+impl ProtoReader for String {
+    fn proto_read(buf: &mut Buffer) -> Self {
+        String::from(buf.read_utf8())
+    }
+}
 
 impl Buffer {
 
@@ -142,6 +237,22 @@ impl Buffer {
        T::from_bytes(self.endian, self.read_slice_u8(std::mem::size_of::<T>())) 
     }
 
+    fn write_u8(&mut self, v:&u8) {        
+        if self.pos == self.data.len() {
+            self.data.push(*v);
+        } else {
+            self.data[self.pos] = *v;
+        }
+
+        self.pos += 1; 
+    }
+
+    fn read_u8(&mut self) -> u8 {
+        self.pos += 1;
+
+        self.data[self.pos - 1]
+    }
+
     fn write_slice_u8(&mut self, v:&[u8]) {        
         let mut data_len = self.data.len();
 
@@ -166,6 +277,7 @@ impl Buffer {
 
         &self.data[(self.pos - len) .. self.pos]
     }
+
 
     pub fn write_utf8(&mut self, v:&str) {
         let str_len = v.len();
@@ -238,16 +350,21 @@ mod tests {
     }
 
     impl User {
-        fn proto_writer(&self, buf:&mut Buffer) {
+    }
+
+    impl ProtoWriter for User {
+        fn proto_write(&self, buf:&mut Buffer) {
             buf.write_utf8(&self.name);
             buf.write_utf8(&self.email);
             buf.write::<u8>(self.age)
         }
+    }
 
-        fn proto_reader(buf:&mut Buffer) -> Self {
-            let name = String::from(buf.read_utf8());
-            let email = String::from(buf.read_utf8());
-            let age = buf.read::<u8>();
+    impl ProtoReader for User {
+        fn proto_read(buf:&mut Buffer) -> Self {
+            let name = String::proto_read(buf);
+            let email = String::proto_read(buf);
+            let age = u8::proto_read(buf);
 
             return User {
                 name,
@@ -266,10 +383,10 @@ mod tests {
             age: 37
         };
 
-        user.proto_writer(&mut b);
+        user.proto_write(&mut b);
 
         b.pos = 0;
-        let readed_user = User::proto_reader(&mut b);
+        let readed_user = User::proto_read(&mut b);
         
         assert_eq!(user, readed_user);
     }
@@ -302,6 +419,26 @@ mod tests {
             println!("Time elapsed in b.write_utf8 is: {:?}", duration);        
         }
 
+        {
+            let mut b = Buffer::new();
+            let start = Instant::now();
+            "123456789".proto_write(&mut b);
+            "123456789".proto_write(&mut b);
+            "123456789".proto_write(&mut b);
+            "123456789".proto_write(&mut b);
+            "123456789".proto_write(&mut b);
+
+            b.pos = 0;
+
+            let _ = String::proto_read(&mut b);
+            let _ = String::proto_read(&mut b);
+            let _ = String::proto_read(&mut b);
+            let _ = String::proto_read(&mut b);
+            let _ = String::proto_read(&mut b);
+            let duration = start.elapsed();
+
+            println!("Time elapsed in proto_write is: {:?}", duration);        
+        }
     }
 
     #[test]
@@ -321,21 +458,21 @@ mod tests {
             #[test]
             fn $func_name() {
                 let mut b = Buffer::new();
-                b.write::<$t>($v0);
-                b.write::<$t>($v1);
-                b.write::<$t>($v2);
+                $v0.proto_write(&mut b);
+                $v1.proto_write(&mut b);
+                $v2.proto_write(&mut b);
 
                 b.pos = std::mem::size_of::<$t>();
 
                 assert_eq!($v1, b.read::<$t>());
 
                 b.pos = $offset;
-                b.write::<$t>($v);
+                $v.proto_write(&mut b);
 
                 //println!("{:?}", b);
 
                 b.pos = $offset;
-                assert_eq!($last, b.read::<$tm>());
+                assert_eq!($last, <$tm>::proto_read(&mut b));
             }
         )
     }
@@ -344,17 +481,17 @@ mod tests {
     test_simple_type! (unit, (), data (), (), (), mdata 1, (), u16, 257);
 
     test_simple_type! (f64, f64, data 1.4242, -2.424, -3444., mdata 1, 10.23424, u16, 16420);
-    test_simple_type! (f32, f32, data 1.4242, -2.424, -3444., mdata 1, 10.23424, u16, 16675);
+    test_simple_type! (f32, f32, data 1.4242f32, -2.424f32, -3444.0f32, mdata 1, 10.23424f32, u16, 16675);
 
-    test_simple_type! (u8, u8, data 1, 2, 3, mdata 1, 10, u16, 2563);
-    test_simple_type! (u16, u16, data 623, 10326, 7596, mdata 2, 10, u32, 662956);
-    test_simple_type! (u32, u32, data 1462387564, 2423423, 344, mdata 10, 104324, u16, 1);
-    test_simple_type! (u64, u64, data 146327563875423464, 234214234423423, 14234242423, mdata 2, 142342424242424, u32, 33141);
+    test_simple_type! (u8, u8, data 1u8, 2u8, 3u8, mdata 1, 10u8, u16, 2563);
+    test_simple_type! (u16, u16, data 623u16, 10326u16, 7596u16, mdata 2, 10u16, u32, 662956u32);
+    test_simple_type! (u32, u32, data 1462387564u32, 2423423u32, 344u32, mdata 10, 104324u32, u16, 1u16);
+    test_simple_type! (u64, u64, data 146327563875423464u64, 234214234423423u64, 14234242423u64, mdata 2, 142342424242424u64, u32, 33141u32);
 
-    test_simple_type! (i8, i8, data 1, -2, -3, mdata 1, 10, i16, 2813);
-    test_simple_type! (i16, i16, data -1625, 2221, -25632, mdata 1, -10, u16, 65526);
-    test_simple_type! (i32, i32, data -1625, 2221, -25632, mdata 3, 10, i64, 45868908443);
-    test_simple_type! (i64, i64, data -1625, 2221, -25632, mdata 1, 4236876876786423424, i32, 986474770);
+    test_simple_type! (i8, i8, data 1i8, -2i8, -3i8, mdata 1, 10i8, i16, 2813i16);
+    test_simple_type! (i16, i16, data -1625i16, 2221i16, -25632i16, mdata 1, -10i16, u16, 65526u16);
+    test_simple_type! (i32, i32, data -1625i32, 2221i32, -25632i32, mdata 3, 10i32, i64, 45868908443i64);
+    test_simple_type! (i64, i64, data -1625i64, 2221i64, -25632i64, mdata 1, 4236876876786423424i64, i32, 986474770i32);
 
 
     #[test]
