@@ -289,7 +289,7 @@ impl Buffer {
         let str_len = v.len();
 
         if self.data.capacity() < self.pos + str_len + std::mem::size_of::<usize>() {
-            self.data.reserve(self.pos + str_len + std::mem::size_of::<usize>() + self.data.capacity());
+            self.data.reserve(self.pos + str_len + std::mem::size_of::<usize>());
         }
 
         self.write::<usize>(str_len);
