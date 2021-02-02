@@ -289,12 +289,10 @@ impl Buffer {
         let str_len = v.len();
 
         if self.data.capacity() < self.pos + str_len + std::mem::size_of::<usize>() {
-            self.data.reserve(self.pos + str_len + std::mem::size_of::<usize>() - self.data.capacity());
+            self.data.reserve(self.pos + str_len + std::mem::size_of::<usize>() + self.data.capacity());
         }
 
         self.write::<usize>(str_len);
-
-        //self.write_slice_u8(v.as_bytes());
 
         let mut add_len = 0;
         if self.data.len() < self.pos + str_len {
@@ -426,14 +424,6 @@ mod tests {
             "123456789".proto_write(&mut b);
             "123456789".proto_write(&mut b);
             "123456789".proto_write(&mut b);
-
-            b.pos = 0;
-
-            let _ = String::proto_read(&mut b);
-            let _ = String::proto_read(&mut b);
-            let _ = String::proto_read(&mut b);
-            let _ = String::proto_read(&mut b);
-            let _ = String::proto_read(&mut b);
             let duration = start.elapsed();
 
             println!("Time elapsed in proto_write is: {:?}", duration);        
@@ -508,6 +498,23 @@ mod tests {
         b.pos = 0;
 
         assert_eq!("[DIY家具]_収納椅子をつくる", b.read_utf8());
+    }
+
+    #[test]
+    fn proto_string() {
+        let mut b = Buffer::new();
+
+        "[DIY家具] 収納椅子をつくる".proto_write(&mut b);
+        b.pos = 0;
+
+        assert_eq!("[DIY家具] 収納椅子をつくる", String::proto_read(&mut b));
+
+        b.pos = 11 + std::mem::size_of::<usize>();
+        0x5fu8.proto_write(&mut b);
+
+        b.pos = 0;
+
+        assert_eq!("[DIY家具]_収納椅子をつくる", String::proto_read(&mut b));
     }
 }
 
