@@ -215,6 +215,40 @@ impl ProtoReader for String {
     }
 }
 
+impl ToBytes for char {
+    fn to_bytes(self, endian: Endian) -> Box<[u8]> {
+        (self as u32).to_bytes(endian)
+    }
+}
+
+fn char_from_u32(i:u32) -> char {
+    pub const MAX: char = '\u{10ffff}';
+
+    if (i > MAX as u32) || (i >= 0xD800 && i <= 0xDFFF) {
+        panic!("char_from_u32 ({})", i)
+    } else {
+        unsafe { std::mem::transmute(i) }
+    }
+}
+
+impl FromBytes for char {
+    fn from_bytes(endian: Endian, s: &[u8]) -> Self {
+        char_from_u32(u32::from_bytes(endian, s))
+    }
+}
+
+impl ProtoReader for char {
+    fn proto_read(buf: &mut Buffer) -> Self {
+        char_from_u32(u32::proto_read(buf))
+    }
+}
+
+impl ProtoWriter for char {
+    fn proto_write(&self, buf: &mut Buffer) {
+        (*self as u32).proto_write(buf)
+    }
+}
+
 impl Buffer {
 
     pub fn build_buffer(cap: usize, endian: Endian) -> Buffer{
@@ -289,7 +323,7 @@ impl Buffer {
         let str_len = v.len();
 
         if self.data.capacity() < self.pos + str_len + std::mem::size_of::<usize>() {
-            self.data.reserve(self.pos + str_len + std::mem::size_of::<usize>());
+            self.data.reserve(self.pos + str_len + std::mem::size_of::<usize>() - self.data.len());//?
         }
 
         self.write::<usize>(str_len);
@@ -390,7 +424,7 @@ mod tests {
 
     #[test]
     fn measure() {
-        {
+        let d0 = || {
             let mut b = Buffer::new();
             let start = Instant::now();
             b.write::<&str>("123456789");
@@ -398,12 +432,10 @@ mod tests {
             b.write::<&str>("123456789");
             b.write::<&str>("123456789");
             b.write::<&str>("123456789");
-            let duration = start.elapsed();
+            start.elapsed()
+        };
 
-            println!("Time elapsed in b.write::<&str> is: {:?}", duration);        
-        }
-
-        {
+        let d1 = || {
             let mut b = Buffer::new();
             let start = Instant::now();
             b.write_utf8("123456789");
@@ -411,12 +443,10 @@ mod tests {
             b.write_utf8("123456789");
             b.write_utf8("123456789");
             b.write_utf8("123456789");
-            let duration = start.elapsed();
+            start.elapsed()
+        };
 
-            println!("Time elapsed in b.write_utf8 is: {:?}", duration);        
-        }
-
-        {
+        let d2 = || {
             let mut b = Buffer::new();
             let start = Instant::now();
             "123456789".proto_write(&mut b);
@@ -424,10 +454,10 @@ mod tests {
             "123456789".proto_write(&mut b);
             "123456789".proto_write(&mut b);
             "123456789".proto_write(&mut b);
-            let duration = start.elapsed();
+            start.elapsed()
+        };
 
-            println!("Time elapsed in proto_write is: {:?}", duration);        
-        }
+        println!("\nTime elapsed: \n\tb.write::<&str> is: {:?}\n\tb.write_utf8 is: {:?}\n\tproto_write is: {:?}\n", d0(), d1(), d2())        
     }
 
     #[test]
@@ -504,17 +534,45 @@ mod tests {
     fn proto_string() {
         let mut b = Buffer::new();
 
+        3u8.proto_write(&mut b);
         "[DIY家具] 収納椅子をつくる".proto_write(&mut b);
-        b.pos = 0;
+        b.pos = 1;
 
         assert_eq!("[DIY家具] 収納椅子をつくる", String::proto_read(&mut b));
 
-        b.pos = 11 + std::mem::size_of::<usize>();
+        b.pos = 1 + 11 + std::mem::size_of::<usize>();
         0x5fu8.proto_write(&mut b);
+
+        b.pos = 1;
+
+        assert_eq!("[DIY家具]_収納椅子をつくる", String::proto_read(&mut b));
+    }
+
+    #[test]
+    fn char() {
+        let mut b = Buffer::new();
+
+        let c0 = "é".chars().next().unwrap();
+        let c1 = "❤️".chars().next().unwrap();
+        let c2 = "納".chars().next().unwrap();
+        let c3 = "۩".chars().next().unwrap();
+
+        c0.proto_write(&mut b);
+        c1.proto_write(&mut b);
+        c2.proto_write(&mut b);
 
         b.pos = 0;
 
-        assert_eq!("[DIY家具]_収納椅子をつくる", String::proto_read(&mut b));
+        assert_eq!(c0, char::proto_read(&mut b));
+        assert_eq!(c1, char::proto_read(&mut b));
+        assert_eq!(c2, char::proto_read(&mut b));
+
+        b.pos = 2;
+        6u8.proto_write(&mut b);
+
+        b.pos = 0;
+
+        assert_eq!(c3, char::proto_read(&mut b));
     }
 }
 
