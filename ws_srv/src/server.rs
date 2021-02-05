@@ -1,89 +1,108 @@
-//#![feature(async_await)]
-//#![feature(async_closure)]
-
-use libc;
 use std::error::Error;
-use std::net::{ TcpListener, TcpStream };
-use std::io;
 use std::os::unix::io::AsRawFd;
+use std::collections::HashMap;
+use std::io::{ self, Read };
 
-use futures::{ 
-    prelude::*,
-    stream,
-};
+use std::net::SocketAddr;
 
-enum Event {
-    Connection(io::Result<TcpStream>),
-}
+use mio::{Events, Interest, Poll, Token};
+use mio::net::{ TcpListener, TcpStream };
 
 use crate::config::Config;
+use crate::client::Client;
+use crate::utils::{ READ_BUF_SIZE };
+
+const LISTENER: Token = Token(0);
 
 #[derive(Debug)]
 pub struct Server {
-    config: Config
-}
-
-fn is_reuseaddr(socket:i32) -> Result<bool, i32> {
-    unsafe {
-        let mut val:u32 = 0;
-        let mut len:u32 = 4;
-
-        let optval = (&mut val) as *mut u32 as *mut libc::c_void;
-        let optlen = (&mut len) as *mut libc::socklen_t;
-        if libc::getsockopt(socket, libc::SOL_SOCKET, libc::SO_REUSEADDR, optval, optlen) == -1 {
-            return Err(*libc::__errno_location());
-        } 
-
-        if val == 1 { Ok(true) } else { Ok(false) }
-    }
-}
-
-fn set_reusaddr(socket:i32, yes:bool) -> Result<(), i32> {
-    unsafe {
-        let mut val:u32 = if yes { 1 } else { 0 };
-        let optval = (&mut val) as *mut u32 as *mut libc::c_void;
-        let optlen:u32 = 4u32;
-
-        if libc::setsockopt(socket, libc::SOL_SOCKET, libc::SO_REUSEADDR, optval, optlen) == -1 {
-            return Err(*libc::__errno_location());
-        } 
-        
-        Ok(())
-    }        
+    config: Config,
+    client_addr: HashMap<Token, Client>,
+    next_token_index: usize
 }
 
 impl Server {
     pub fn new(config:Config) -> Server {
         Server {
-            config
+            config,
+            client_addr: HashMap::new(),
+            next_token_index: LISTENER.into()
         }
     }
 
-    pub async fn run(&self) -> Result<(), Box<dyn Error>> {        
-        let addr = self.config.host.to_owned() + ":" + &self.config.port.to_string();
+    fn get_next_token(&mut self) -> Token {
+        self.next_token_index += 1;
+        Token(self.next_token_index)
+    }
 
-        let listener = TcpListener::bind(addr)?;
-        eprintln!("Listening on {}", listener.local_addr()?);
+    pub fn run(&mut self) -> Result<(), Box<dyn Error>> {        
+        let addr = (self.config.host.to_owned() + ":" + &self.config.port.to_string()).parse()?;
 
-        if !(is_reuseaddr(listener.as_raw_fd()).unwrap()) {
-            set_reusaddr(listener.as_raw_fd(), true).unwrap();
-        }
+        let mut poll = Poll::new()?;
+        let mut events = Events::with_capacity(128);
 
-        let connections = listener.incoming().map(|stream| { Event::Connection(stream)});        
+        let mut listener = TcpListener::bind(addr)?;
+        println!("Listening on {}", listener.local_addr()?);
 
-        let mut events = stream::iter(connections);
+        poll.registry().register(&mut listener, LISTENER, Interest::READABLE)?;
 
         loop {
-            match events.next().await {
-                Some (Event::Connection(Ok(stream))) => {
-                    stream.set_nonblocking(true)?;
 
-                    println!("{:?}", &stream);
+            poll.poll(&mut events, None)?;
+
+            for event in events.iter() {
+                match event.token() {
+                    LISTENER => {
+                        loop {
+                            match listener.accept() {
+                                Ok((mut client, addr))=> {
+                                    println!("{:?}", addr);
+
+                                    let token = self.get_next_token();
+                                    poll.registry().register(&mut client, token, Interest::READABLE | Interest::WRITABLE)?;
+
+                                    let client = Client::new(client, addr);
+                
+                                    self.client_addr.insert(token, client);
+                                }
+                                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                   // Socket is not ready anymore, stop accepting
+                                    break;
+                                }
+                                e => panic!("err={:?}", e),    
+                            }
+                        }
+                    }
+
+                    token => {
+                        loop {
+                            match self.client_addr.get_mut(&token).unwrap().read() {
+                                Ok(0) => {
+                                    println!("remove token {:?}", &token);
+                                    self.client_addr.remove(&token);
+                                    break;
+                                }
+    
+                                Ok(n) => {
+                                    if (n < READ_BUF_SIZE) {
+                                        self.client_addr.get_mut(&token).unwrap().process_packet();
+
+                                        break;
+                                    }
+
+                                }
+
+                                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                    // Socket is not ready anymore, stop reading
+                                    break;
+                                }
+
+                                e => panic!("err={:?}", e)
+                            }
+                        }
+                    }
                 }
-                _ => panic!("Event error"),
             }
         }
-
-        //Ok(())
     }
 }

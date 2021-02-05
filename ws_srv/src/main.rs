@@ -1,7 +1,7 @@
 use std::env::args;
 use std::process;
 
-use futures::executor::block_on;
+//use futures::executor::block_on;
 
 use ws_srv::Config;
 use ws_srv::Server;
@@ -15,8 +15,8 @@ fn main() {
         process::exit(1)
     });
 
-    let server = Server::new(config);
-    block_on(server.run()).unwrap_or_else(|err| {
+    let mut server = Server::new(config);
+    server.run().unwrap_or_else(|err| {
         eprintln!("Problem runing server: {}", err);
         process::exit(1)
     }); 
