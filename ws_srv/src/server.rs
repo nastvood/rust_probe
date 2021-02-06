@@ -1,12 +1,11 @@
 use std::error::Error;
-use std::os::unix::io::AsRawFd;
+//use std::os::unix::io::AsRawFd;
 use std::collections::HashMap;
-use std::io::{ self, Read };
-
-use std::net::SocketAddr;
+use std::io::{ self };
+//use std::net::SocketAddr;
 
 use mio::{Events, Interest, Poll, Token};
-use mio::net::{ TcpListener, TcpStream };
+use mio::net::{ TcpListener };
 
 use crate::config::Config;
 use crate::client::Client;
@@ -84,12 +83,11 @@ impl Server {
                                 }
     
                                 Ok(n) => {
-                                    if (n < READ_BUF_SIZE) {
-                                        self.client_addr.get_mut(&token).unwrap().process_packet();
+                                    if n < READ_BUF_SIZE {
+                                        self.client_addr.get_mut(&token).unwrap().process_packet();                                        
 
                                         break;
                                     }
-
                                 }
 
                                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {

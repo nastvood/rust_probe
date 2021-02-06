@@ -1,18 +1,133 @@
 <!DOCTYPE html>
 <html>
   <head>
+
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+
     <title>ws client</title>
 
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
 
     <script>
-      let socket = new WebSocket("ws://127.0.0.1:8080");
-      console.log(socket);
+      function getRandomInt(max) {
+        return Math.floor(Math.random() * Math.floor(max));
+      }
+
+      let socket;
+      let userName = "@user" + getRandomInt(1000000);
+      let isLogged = false;
+
+      let socketOnOpen = function(e) {
+        $("#nameInput").hide();
+        $("#alert").addClass("alert-success");
+        $("#alert").text("User " + userName + " is connected");
+        $("#alert").show();
+
+        $("#btnSend").prop('disabled', false);
+        $("#sendInput").prop('disabled', false);
+
+        if (!isLogged) {
+          let data = {
+            "action": "login",
+            "data": {
+              "login": userName,
+              "pass" : ""
+            }
+          }; //pass https
+          socket.send(JSON.stringify(data));
+        }
+      };
+
+      let socketOnClose = function(error) {
+        let message = error.code;
+
+        switch (error.code) {
+          case 1006: 
+            message = "No close code frame has been receieved";
+            break;
+        }
+        
+        $("#nameInput").hide();
+        $("#alert").addClass("alert-danger");
+        $("#alert").text(message);
+        $("#alert").show();
+        $("#btnConnect").prop('disabled', true);
+      };
+
+      let socketOnMessage = function(e) {
+        console.log(e);
+      }
+
+      let connect = function() {
+        userName = $("#nameInput").val().trim();
+
+        if (userName === "") {
+          return
+        }
+
+        socket = new WebSocket("ws://127.0.0.1:8080");
+
+        console.log(socket);
+
+        socket.onopen = socketOnOpen;
+        socket.onclose = socketOnClose;
+        socket.onmessage = socketOnMessage;
+      }
+
+      let send = function() {
+        let data = $("#sendInput").val();
+
+        $("#chat").append('<span class="badge badge-primary text-right">' + userName  + '</span>');
+        $("#chat").append('<div class="alert alert-light text-right" role="alert">' + data  + '</div>');
+
+        socket.send(data);
+
+      }
+
+      $(document).ready(function(){
+        $("#nameInput").val(userName);
+
+        $("#btnConnect").click(connect);
+        $("#btnSend").click(send);
+
+      });
     </script>
   </head>
 
   <body>
 
-   </body>
+    <div class="container">
+      
+      <div class="row"> 
+          <div class="col-sm-10 py-1">
+            <input class="form-control" id="nameInput">
+            <div class="alert" role="alert" style="display:none" id="alert"></div>
+          </div>
+          <div class="col-sm-2 py-1">
+            <button type="button" class="btn btn-primary" id="btnConnect">Connect</button>
+          </div>
+      </div>
+
+      <div class="row"> 
+          <div class="col-sm-10 py-1">
+            <input class="form-control" id="sendInput" disabled>
+          </div>
+          <div class="col-sm-2 py-1">
+            <button type="button" class="btn btn-success" id="btnSend" disabled>Send</button>
+          </div>
+      </div>          
+
+      <div class="row"> 
+          <div class="col-sm-11 py-1" id="chat">
+          </div>
+      </div>          
+
+    </div>
+
+  </body>
 </html>

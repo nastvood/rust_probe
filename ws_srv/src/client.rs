@@ -2,13 +2,19 @@ use std::error::Error;
 use mio::net::{ TcpStream };
 use std::net::{ SocketAddr };
 use std::collections::HashMap;
-use std::io::{ self, Read };
+use std::io::{ self, Read, Write };
 
-use crate::utils::{ READ_BUF_SIZE };
+extern crate base64;
+
+use crate::utils::*;
+use crate::ws::{ Opcode, Frame };
+use crate::actions::{ Action };
 
 #[derive(Debug)]
 enum Status {
     AwaitingHandshake,
+    AwaitingLogin,
+    Ok,
 }
 
 #[derive(Debug)]
@@ -16,7 +22,8 @@ pub struct Client {
     status: Status,
     pub stream: TcpStream,
     addr: SocketAddr,
-    buf: Vec<u8>,
+    read_buf: Vec<u8>,
+    write_buf: Vec<u8>,
     header: HashMap<String, String>,
 }
 
@@ -26,27 +33,28 @@ impl Client {
             status : Status::AwaitingHandshake,
             stream,
             addr,
-            buf:Vec::with_capacity(READ_BUF_SIZE),
+            read_buf:Vec::with_capacity(READ_BUF_SIZE),
+            write_buf:Vec::with_capacity(WRITE_BUF_SIZE),
             header: HashMap::new() 
         }
     }
 
     pub fn read(&mut self) -> io::Result<usize> {
-        let cur_len = self.buf.len();
+        let cur_len = self.read_buf.len();
 
-        if self.buf.capacity() < cur_len + READ_BUF_SIZE {
-            self.buf.reserve(cur_len + READ_BUF_SIZE)
+        if self.read_buf.capacity() < cur_len + READ_BUF_SIZE {
+            self.read_buf.reserve(cur_len + READ_BUF_SIZE)
         }
         
         unsafe {
-            self.buf.set_len(cur_len + READ_BUF_SIZE);
+            self.read_buf.set_len(cur_len + READ_BUF_SIZE);
         }
 
-        match self.stream.read(&mut self.buf.as_mut_slice()[cur_len..(cur_len + READ_BUF_SIZE)]) {
+        match self.stream.read(&mut self.read_buf.as_mut_slice()[cur_len..(cur_len + READ_BUF_SIZE)]) {
             Ok(n) if n > 0 => {
                 //println!(" ---- read {}", n);
                 unsafe {                
-                    self.buf.set_len(cur_len + n);
+                    self.read_buf.set_len(cur_len + n);
                 }
 
                 Ok(n)
@@ -54,7 +62,7 @@ impl Client {
 
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 unsafe {                
-                    self.buf.set_len(cur_len);
+                    self.read_buf.set_len(cur_len);
                 }
 
                 Err(e)
@@ -68,20 +76,25 @@ impl Client {
     fn read_header(&mut self) -> Result<(), Box<dyn Error>> {
         match self.status {
             Status::AwaitingHandshake => {
-                let s:&str = std::str::from_utf8(&self.buf)?;
+                let s:&str = std::str::from_utf8(&self.read_buf)?;
 
                 for data in s.split("\r\n\r\n") {
                     for line in data.split("\r\n") {
                         let mut first = None;
 
-                        for part in line.splitn(2, ' ') {
+                        for part in line.splitn(2, ':') {
                             match first {
                                 None => { 
                                     first = Some (part)
                                 }
                                 Some(k) => {
                                     println!("[{}]:[{}]", k, part);
-                                    self.header.insert(k.to_lowercase(), part.to_owned());
+
+                                    let v = match part.strip_prefix(" ") {
+                                        Some(v) => v.to_owned(),
+                                        None => part.to_owned()
+                                    };
+                                    self.header.insert(k.to_lowercase(), v);
                                     first = None
                                 }
                             }
@@ -89,23 +102,39 @@ impl Client {
                     }
                 }
 
-                self.buf.clear();
+                self.read_buf.clear();
 
                 println!("{:?}", self.header);
 
                 Ok(())
             }
+
+            Status::AwaitingLogin => {
+                let frame = Frame::new(&self.read_buf);
+
+                println!{"{:?}", frame};
+                match frame.opcode {
+                    Opcode::Text(data) => {
+                        let action = Action::from_str(&data);
+                        println!{"{:?}", action};
+                        Ok(())
+                    }
+                    _ => Ok(())
+                }
+            }
+
+            Status::Ok => {
+                Ok(())
+            }
         }
     }
 
-    fn gen_key(&self) {
-        let mut sign = match self.header.get("sec-websocket-key") {
-            Some (key) => { key.clone() }
-            None => { String::from("") }
-        };
-
-        sign.push_str("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-    }
+    /*fn fill_write_buf(&mut self, s:&str) {
+        unsafe {
+            self.write_buf.set_len(s.len());
+            std::ptr::copy(s.as_ptr(), self.write_buf.as_mut_ptr(), s.len());
+        }
+    }*/
 
     pub fn process_packet(&mut self) -> Result<(), Box<dyn Error>> {
         self.header.clear();
@@ -114,12 +143,28 @@ impl Client {
             Status::AwaitingHandshake => {
                 self.read_header()?;
 
-                //println!("{:?}", String::from_utf8(self.buf.clone()));
+                let key = gen_key(self.header.get("sec-websocket-key"));
 
+                let resp = format!("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\nUpgrade: websocket\r\n\r\n", key);
+
+                //self.fill_write_buf(resp.as_str());
+                self.stream.write(resp.as_bytes());
+
+                self.status = Status::AwaitingLogin;
+
+            }
+
+            Status::AwaitingLogin => {
+                println!("{:?}", self.read_buf);
+
+                self.read_header()?;
+            }
+
+            Status::Ok => {
             }
         }
 
-        self.buf.clear();
+        self.read_buf.clear();
 
         Ok(())
     }

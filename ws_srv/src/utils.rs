@@ -1,6 +1,26 @@
 //use libc;
+use sha1::{Sha1, Digest};
+
+extern crate base64;
 
 pub const READ_BUF_SIZE: usize = 128;
+pub const WRITE_BUF_SIZE: usize = 128;
+
+pub fn gen_key(websocket_key:Option<&String>) -> String {
+    let mut sign = match websocket_key {
+        Some (key) => { key.clone() }
+        None => { String::from("") }
+    };
+
+    sign.push_str("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+
+    let mut sha = Sha1::default();
+    sha.input(sign.as_ref());
+
+    let res = sha.result();
+    
+    base64::encode(res.as_slice())
+}
 
 /*pub fn is_reuseaddr(socket:i32) -> Result<bool, i32> {
     unsafe {
