@@ -23,7 +23,7 @@ impl Frame {
     pub fn new(buf:&Vec<u8>) -> Frame {
         let mut offset = 0;
 
-        let fin = buf[offset].wrapping_shr(7) != 0;
+        let fin = buf[offset] >> 7 != 0;
 
         if !fin {
             panic!{"Only short messages"}
@@ -32,7 +32,7 @@ impl Frame {
         let opcode = buf[offset] & 0x0F;
 
         offset += 1;
-        let mask = buf[offset].wrapping_shr(7) != 0;
+        let mask = buf[offset] >> 7 != 0;
 
         let size = match buf[offset] & 0x7F {
             v if v < 126 => {
@@ -50,8 +50,12 @@ impl Frame {
             v => panic!{"Reading ws frame size from number {}", v}, 
         };
 
-        let mask_val = [buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3]];
-        offset += 4;        
+        let mask_val = if mask {
+            offset += 4;        
+            [buf[offset - 4], buf[offset - 3], buf[offset - 2], buf[offset - 1]]
+        } else {
+            [0u8; 4]
+        };
 
         let opcode = match opcode {
             0x0 => Opcode::Continuation,
@@ -79,5 +83,92 @@ impl Frame {
             size,
             mask_val
         }
+    }
+}
+
+impl From<&str> for Frame {
+    fn from(s: &str) -> Self {
+        Frame {
+            fin: true,
+            opcode:Opcode::Text(s.to_owned()),
+            mask: false,
+            size:s.len(),
+            mask_val:[0u8; 4],
+        }
+    }
+}
+
+impl From<&Frame> for Vec<u8> {
+    fn from(frame: &Frame) -> Self {
+        let data_len = match &frame.opcode {
+            Opcode::Text(s) => s.len(),
+            _ => 0
+        };
+
+        let mut buf = Vec::with_capacity(12 + data_len);      
+
+        //let mut offset = 0;
+
+        let mut byte:u8 = if frame.fin { 1 << 7 } else { 0 };
+        let opcode = match &frame.opcode {
+            Opcode::Continuation => 0x0,
+            Opcode::Text(_) => 0x1,
+            Opcode::Binary => 0x2,
+            Opcode::Close => 0x8,
+            Opcode::Ping => 0x9,
+            Opcode::Pong => 0xa,
+            Opcode::Other => panic!{"Number from opcode"}
+        };
+        byte += opcode;
+        buf.push(byte);    
+
+        byte = if frame.mask { 1 << 7 } else { 0 };
+        match data_len {
+            len if len < 126 => {
+                byte += len as u8;
+                buf.push(byte)
+            },
+
+            len if len < 65536 => {                
+                byte += 126;
+                buf.push(byte);
+
+                let bytes = (len as u16).to_be_bytes();
+                buf.push(bytes[0]);
+                buf.push(bytes[1])                
+            },
+
+            len => {
+                byte += 128;
+                buf.push(byte);
+
+                let bytes = (len as u64).to_be_bytes();
+                buf.push(bytes[0]);
+                buf.push(bytes[1]);
+                buf.push(bytes[2]);               
+                buf.push(bytes[3]);                
+                buf.push(bytes[4]);                
+                buf.push(bytes[5]);                
+                buf.push(bytes[6]);                
+                buf.push(bytes[7]);                
+            }
+        }
+
+        match &frame.opcode {
+            Opcode::Text(s) => {           
+                unsafe {
+                    let len = s.len();
+                    if len > 0 {
+                        let new_len = len + buf.len();
+                        s.as_ptr().copy_to(buf.as_mut_ptr().offset(buf.len() as isize), s.len());
+                        buf.set_len(new_len)
+                    }
+                }
+            },
+
+            _ => ()
+        }
+
+        buf
     }
 }

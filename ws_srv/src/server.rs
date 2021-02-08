@@ -1,7 +1,7 @@
 use std::error::Error;
 //use std::os::unix::io::AsRawFd;
 use std::collections::HashMap;
-use std::io::{ self };
+use std::io::{ self, Write };
 //use std::net::SocketAddr;
 
 use mio::{Events, Interest, Poll, Token};
@@ -84,7 +84,14 @@ impl Server {
     
                                 Ok(n) => {
                                     if n < READ_BUF_SIZE {
-                                        self.client_addr.get_mut(&token).unwrap().process_packet();                                        
+                                        match self.client_addr.get_mut(&token).unwrap().process_packet() {
+                                            Ok(Some(resp)) => {
+                                                for (_token, client) in self.client_addr.iter_mut() {
+                                                    client.stream.write(resp.as_ref())?;
+                                                }
+                                            },
+                                            _ => {}
+                                        }
 
                                         break;
                                     }

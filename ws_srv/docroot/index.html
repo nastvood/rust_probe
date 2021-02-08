@@ -61,6 +61,11 @@
 
       let socketOnMessage = function(e) {
         console.log(e);
+
+        let obj = JSON.parse(e.data);  
+
+        $("#chat").append('<span class="badge badge-primary text-right">' + obj.from  + '</span>');
+        $("#chat").append('<div class="alert alert-light text-right" role="alert">' + obj.message  + '</div>');
       }
 
       let connect = function() {
@@ -80,13 +85,18 @@
       }
 
       let send = function() {
-        let data = $("#sendInput").val();
+        let message = $("#sendInput").val().trim();
 
-        $("#chat").append('<span class="badge badge-primary text-right">' + userName  + '</span>');
-        $("#chat").append('<div class="alert alert-light text-right" role="alert">' + data  + '</div>');
+        if (message !== "") {
+          let data = {
+            "action": "message",
+            "data": {
+              "message": message,
+            }
+          }
 
-        socket.send(data);
-
+          socket.send(JSON.stringify(data));
+        }
       }
 
       $(document).ready(function(){

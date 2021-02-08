@@ -8,13 +8,13 @@ extern crate base64;
 
 use crate::utils::*;
 use crate::ws::{ Opcode, Frame };
-use crate::actions::{ Action };
+use crate::actions::{ Action, Login, RespMessage };
 
 #[derive(Debug)]
 enum Status {
     AwaitingHandshake,
     AwaitingLogin,
-    Ok,
+    Loggined,
 }
 
 #[derive(Debug)]
@@ -25,6 +25,7 @@ pub struct Client {
     read_buf: Vec<u8>,
     write_buf: Vec<u8>,
     header: HashMap<String, String>,
+    login: Option<String>
 }
 
 impl Client {
@@ -35,7 +36,8 @@ impl Client {
             addr,
             read_buf:Vec::with_capacity(READ_BUF_SIZE),
             write_buf:Vec::with_capacity(WRITE_BUF_SIZE),
-            header: HashMap::new() 
+            header: HashMap::new(),
+            login: None
         }
     }
 
@@ -73,7 +75,7 @@ impl Client {
         }
     }
 
-    fn read_header(&mut self) -> Result<(), Box<dyn Error>> {
+    fn read_packet(&mut self) -> Result<Option<Action>, Box<dyn Error>> {
         match self.status {
             Status::AwaitingHandshake => {
                 let s:&str = std::str::from_utf8(&self.read_buf)?;
@@ -106,25 +108,35 @@ impl Client {
 
                 println!("{:?}", self.header);
 
-                Ok(())
+                Ok(None)
             }
 
             Status::AwaitingLogin => {
                 let frame = Frame::new(&self.read_buf);
 
-                println!{"{:?}", frame};
                 match frame.opcode {
                     Opcode::Text(data) => {
-                        let action = Action::from_str(&data);
-                        println!{"{:?}", action};
-                        Ok(())
+                        let action = Action::from(&data[..]);
+
+                        Ok(Some(action))
                     }
-                    _ => Ok(())
+                    _ => Ok(None)
                 }
             }
 
-            Status::Ok => {
-                Ok(())
+            Status::Loggined => {
+
+                let frame = Frame::new(&self.read_buf);
+
+
+                match frame.opcode {
+                    Opcode::Text(data) => {
+                        let action = Action::from(&data[..]);
+
+                        Ok(Some(action))
+                    }
+                    _ => Ok(None)
+                }
             }
         }
     }
@@ -136,36 +148,74 @@ impl Client {
         }
     }*/
 
-    pub fn process_packet(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn check_login(&self, login:&Login) -> bool {
+        return !login.login.is_empty()
+    }
+
+    pub fn process_packet(&mut self) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         self.header.clear();
 
-        match self.status {
+        println!("{}:{}: {:?}", file!(), line!(), self.status);
+        let res = match self.status {
             Status::AwaitingHandshake => {
-                self.read_header()?;
+                self.read_packet()?; 
 
                 let key = gen_key(self.header.get("sec-websocket-key"));
 
                 let resp = format!("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\nUpgrade: websocket\r\n\r\n", key);
 
-                //self.fill_write_buf(resp.as_str());
-                self.stream.write(resp.as_bytes());
+                self.stream.write(resp.as_bytes())?;
 
                 self.status = Status::AwaitingLogin;
 
+                Ok(None)
             }
 
             Status::AwaitingLogin => {
-                println!("{:?}", self.read_buf);
+                let packet:Option<Action> = self.read_packet()?;
 
-                self.read_header()?;
+                match packet {
+                    Some(Action::Login(login)) => {
+                        println!("{}:{}: {:?}", file!(), line!(), login);
+
+                        if self.check_login(&login) {
+                            self.login = Some(login.login);
+                            self.status = Status::Loggined
+                        }
+
+                        Ok(None)
+                    }, 
+
+                    _ => Ok(None)
+                }
             }
 
-            Status::Ok => {
+            Status::Loggined => {
+                let packet:Option<Action> = self.read_packet()?;
+
+                match packet {
+                    Some(Action::Message(message)) => {
+                        println!("{}:{}: {:?}", file!(), line!(), message);
+
+                        let resp_message = RespMessage {
+                            from: self.login.as_ref().unwrap().to_string(),
+                            message: message.message
+                        };
+
+                        let json_mess = serde_json::to_string(&resp_message)?;
+                        let frame:Frame = json_mess.as_str().into();
+                        let res:Vec<u8> = Vec::from(&frame);
+                        
+                        Ok(Some(res))
+                    }, 
+
+                    _ => Ok(None)
+                }
             }
-        }
+        };
 
         self.read_buf.clear();
 
-        Ok(())
+        res
     }
 }
