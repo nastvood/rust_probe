@@ -54,7 +54,6 @@ impl Client {
 
         match self.stream.read(&mut self.read_buf.as_mut_slice()[cur_len..(cur_len + READ_BUF_SIZE)]) {
             Ok(n) if n > 0 => {
-                //println!(" ---- read {}", n);
                 unsafe {                
                     self.read_buf.set_len(cur_len + n);
                 }
@@ -90,7 +89,7 @@ impl Client {
                                     first = Some (part)
                                 }
                                 Some(k) => {
-                                    println!("[{}]:[{}]", k, part);
+                                    //log!("[{}]:[{}]", k, part);
 
                                     let v = match part.strip_prefix(" ") {
                                         Some(v) => v.to_owned(),
@@ -106,7 +105,7 @@ impl Client {
 
                 self.read_buf.clear();
 
-                println!("{:?}", self.header);
+                log!("{:?}", self.header);
 
                 Ok(None)
             }
@@ -155,7 +154,6 @@ impl Client {
     pub fn process_packet(&mut self) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         self.header.clear();
 
-        println!("{}:{}: {:?}", file!(), line!(), self.status);
         let res = match self.status {
             Status::AwaitingHandshake => {
                 self.read_packet()?; 
@@ -176,7 +174,7 @@ impl Client {
 
                 match packet {
                     Some(Action::Login(login)) => {
-                        println!("{}:{}: {:?}", file!(), line!(), login);
+                        log!("{:?}", login);
 
                         if self.check_login(&login) {
                             self.login = Some(login.login);
@@ -195,7 +193,7 @@ impl Client {
 
                 match packet {
                     Some(Action::Message(message)) => {
-                        println!("{}:{}: {:?}", file!(), line!(), message);
+                        log!("{:?}", message);
 
                         let resp_message = RespMessage {
                             from: self.login.as_ref().unwrap().to_string(),

@@ -41,7 +41,7 @@ impl Server {
         let mut events = Events::with_capacity(128);
 
         let mut listener = TcpListener::bind(addr)?;
-        println!("Listening on {}", listener.local_addr()?);
+        log!{"listening on {}", listener.local_addr()?}
 
         poll.registry().register(&mut listener, LISTENER, Interest::READABLE)?;
 
@@ -55,7 +55,7 @@ impl Server {
                         loop {
                             match listener.accept() {
                                 Ok((mut client, addr))=> {
-                                    println!("{:?}", addr);
+                                    log!("accept {:?}", addr);
 
                                     let token = self.get_next_token();
                                     poll.registry().register(&mut client, token, Interest::READABLE | Interest::WRITABLE)?;
@@ -77,7 +77,7 @@ impl Server {
                         loop {
                             match self.client_addr.get_mut(&token).unwrap().read() {
                                 Ok(0) => {
-                                    println!("remove token {:?}", &token);
+                                    log!("remove token {:?}", &token);
                                     self.client_addr.remove(&token);
                                     break;
                                 }
