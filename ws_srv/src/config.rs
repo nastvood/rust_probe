@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::str::FromStr;
 
-use crate::logger::*;
-
 #[derive(Debug)]
 pub struct Config {
   pub port: u16,
@@ -43,6 +41,8 @@ fn parse_args(args: &[String]) -> HashMap<String, Option<String>> {
         }
     }
 
+    //println!{"{:?}", hargs};
+
     return hargs;
 }
 
@@ -55,14 +55,15 @@ impl Config {
 
         let mut conf = Config::default();
 
-//            LOGGER = Box::new(super::FileLogger::new("ws.log")) as super::LOGGER;
-
         for (key, val) in parse_args(args) {
             match (&key[..], val) {
                 ("-p", Some(v)) => conf.port = u16::from_str(&v)?,
                 ("-h", Some(v)) => conf.host = v.clone(),
+                ("--path-log", Some(v)) => { 
+                    super::logger::set(Box::new(super::logger::FileLogger::new(&v[..])));
+                },
                 ("--disable-log", None) => { 
-                    LOGGER.disable();                 
+                    super::logger::disable();
                 },
                 _ => {}
             }

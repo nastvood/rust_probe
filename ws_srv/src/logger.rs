@@ -1,4 +1,4 @@
-pub trait Log: /*Sync + Send*/ {
+pub trait Log: {
     fn log(&self, s:&str) -> ();
 
     fn disable(&self) -> ();
@@ -81,6 +81,7 @@ impl Log for FileLogger {
     fn log(&self, s:&str) {
         match self.file.lock() {
             Ok(mut file) => {
+                let _ = file.write("\n".as_bytes());
                 let _ = file.write_all(s.as_bytes());
                 ()
             },
@@ -100,7 +101,27 @@ impl Log for FileLogger {
 }
 
 lazy_static! {
-    pub static ref LOGGER:Box<(dyn Log + Sync)> = Box::new(StdoutLogger { 
-        enabled: Arc::new(Mutex::new(true))
-    });
+    pub static ref LOGGER:Mutex<Vec<Box<(dyn Log + Sync + Send)>>> = Mutex::new(vec![
+        Box::new(StdoutLogger { 
+            enabled: Arc::new(Mutex::new(true))
+        })
+    ]);
+}
+
+pub fn set(new_logger:Box<dyn Log + Sync + Send >) {
+    LOGGER.lock().unwrap().clear();
+
+    LOGGER.lock().unwrap().push(new_logger);        
+}
+
+pub fn is_enable() -> bool {
+    LOGGER.lock().unwrap()[0].is_enable()
+}
+
+pub fn disable() {
+    LOGGER.lock().unwrap()[0].disable();
+}
+
+pub fn log(s:&str) {
+    LOGGER.lock().unwrap()[0].log(s);
 }

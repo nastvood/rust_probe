@@ -1,5 +1,3 @@
-//use std::time::{ Duration };
-
 macro_rules! cur_hours_minutes_seconds  {
     () => {{
         let dt = chrono::Local::now();
@@ -19,10 +17,10 @@ macro_rules! cur_hours_minutes_seconds  {
 #[macro_export]
 macro_rules! log {
     ($($arg:tt)*) => { 
-        if super::LOGGER.is_enable() {
+        if super::logger::is_enable() {
             let (hours, minutes, seconds) = cur_hours_minutes_seconds!{};
             let s = format!{ "\x1b[1;35m[{}:{}]\x1b[0;34m[{:02}:{:02}:{:02}]\x1b[0m {}",file!{}, line!{}, hours, minutes, seconds, format!{ $($arg)* } };
-            super::LOGGER.log(&s[..]);
+            super::logger::log(&s[..]);
         }
     };
 }

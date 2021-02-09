@@ -30,13 +30,13 @@ pub enum Action {
 
 impl Action {
     pub fn from_str(data:&str) -> Result<Action> {
-        println!("{}:{}: {:?}", file!(), line!(), data);
+        log!("{:?}", data);
 
         let v:Value = serde_json::from_str(data)?;
 
         match (&v["action"], &v["data"]) {
             (Value::String(action), obj) => {
-                println!("{}:{}: {:?} {:?}", file!(), line!(), action, obj);
+                log!("{:?} {:?}", action, obj);
                 match action {
                     action if action == "login" => {
                         match serde_json::from_value(obj.to_owned()) {
