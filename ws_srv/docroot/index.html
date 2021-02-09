@@ -64,8 +64,20 @@
 
         let obj = JSON.parse(e.data);  
 
-        $("#chat").append('<span class="badge badge-primary text-right">' + obj.from  + '</span>');
-        $("#chat").append('<div class="alert alert-light text-right" role="alert">' + obj.message  + '</div>');
+        if (obj.hasOwnProperty("from") && obj.hasOwnProperty("message")) {
+          let rightBadge = "";
+          let rightAlert = "";
+          let classBadge = "bg-info"
+
+          if (userName === obj.from) {
+            rightBadge = "float-right";
+            rightAlert = "text-right";
+            classBadge = "bg-primary";
+          }
+
+          $("#chat").append('<span class="badge ' + classBadge + ' ' + rightBadge  + '">' + obj.from  + '</span><br/>');
+          $("#chat").append('<p class="text-break ' + rightAlert + '">' + obj.message  + '</p>');
+        }
       }
 
       let connect = function() {
@@ -96,6 +108,7 @@
           }
 
           socket.send(JSON.stringify(data));
+          $("#sendInput").val("");
         }
       }
 
@@ -133,7 +146,7 @@
       </div>          
 
       <div class="row"> 
-          <div class="col-sm-11 py-1" id="chat">
+          <div class="col-sm-11 text-break py-4" id="chat">
           </div>
       </div>          
 

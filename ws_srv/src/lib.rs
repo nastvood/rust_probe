@@ -3,6 +3,9 @@ pub mod logger;
 #[macro_use]
 mod macros;
 
+#[macro_use]
+extern crate lazy_static;
+
 mod utils;
 pub mod config;
 mod ws;
