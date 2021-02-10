@@ -1,8 +1,20 @@
-pub trait Log: {
-    fn log(&self, s:&str) -> ();
+#[allow(dead_code)]
+#[derive(Debug)]
+enum Level {
+    Log,
+    Warning,
+    Error,
+    Info
+}
 
-    fn disable(&self) -> ();
+pub trait Log: {
+    fn log(&self, s:&str);
+
+    fn disable(&self);
     fn is_enable(&self) -> bool;
+
+    fn disable_color(&self);
+    fn is_color(&self) -> bool;
 }
 
 /*
@@ -41,7 +53,8 @@ unsafe { SimpleLogger::LOGGER = S; }
 use std::{sync::Mutex, sync::Arc};
 
 struct StdoutLogger {
-    enabled: Arc<Mutex<bool>>
+    enabled: Arc<Mutex<bool>>,
+    colored: Arc<Mutex<bool>> 
 }
 
 impl Log for StdoutLogger {
@@ -57,6 +70,17 @@ impl Log for StdoutLogger {
 
     fn is_enable(&self) -> bool {
         *self.enabled.lock().unwrap()
+    }
+
+
+    fn disable_color(&self) {
+        let m = Arc::clone(&self.colored);
+        let mut colored = m.lock().unwrap();
+        *colored = false;
+    }
+
+    fn is_color(&self) -> bool {
+        *self.colored.lock().unwrap()
     }
 }
 
@@ -79,13 +103,9 @@ impl FileLogger {
 
 impl Log for FileLogger {
     fn log(&self, s:&str) {
-        match self.file.lock() {
-            Ok(mut file) => {
-                let _ = file.write("\n".as_bytes());
-                let _ = file.write_all(s.as_bytes());
-                ()
-            },
-            _ => {}
+        if let Ok(mut file) = self.file.lock() {
+            let _ = file.write("\n".as_bytes());
+            let _ = file.write_all(s.as_bytes());
         }
     }
 
@@ -95,17 +115,29 @@ impl Log for FileLogger {
         *enabled = false;
     }
 
+    fn disable_color(&self) {}
+
     fn is_enable(&self) -> bool {
         *self.enabled.lock().unwrap()
+    }
+
+    fn is_color(&self) -> bool {
+        false    
     }
 }
 
 lazy_static! {
     pub static ref LOGGER:Mutex<Vec<Box<(dyn Log + Sync + Send)>>> = Mutex::new(vec![
         Box::new(StdoutLogger { 
-            enabled: Arc::new(Mutex::new(true))
+            enabled: Arc::new(Mutex::new(true)),
+            colored: Arc::new(Mutex::new(true))
         })
     ]);
+
+    pub static ref LOCAL_TIME_OFFSET:i64 = {
+        let dt = chrono::Local::now();
+        dt.offset().local_minus_utc() as i64
+    };
 }
 
 pub fn set(new_logger:Box<dyn Log + Sync + Send >) {
@@ -120,6 +152,14 @@ pub fn is_enable() -> bool {
 
 pub fn disable() {
     LOGGER.lock().unwrap()[0].disable();
+}
+
+pub fn is_color() -> bool {
+    LOGGER.lock().unwrap()[0].is_color()
+}
+
+pub fn disable_color() {
+    LOGGER.lock().unwrap()[0].disable_color()
 }
 
 pub fn log(s:&str) {

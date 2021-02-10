@@ -110,29 +110,12 @@ impl Client {
                 Ok(None)
             }
 
-            Status::AwaitingLogin => {
+            Status::AwaitingLogin | Status::Loggined => {
                 let frame = Frame::new(&self.read_buf);
 
                 match frame.opcode {
                     Opcode::Text(data) => {
-                        let action = Action::from(&data[..]);
-
-                        Ok(Some(action))
-                    }
-                    _ => Ok(None)
-                }
-            }
-
-            Status::Loggined => {
-
-                let frame = Frame::new(&self.read_buf);
-
-
-                match frame.opcode {
-                    Opcode::Text(data) => {
-                        let action = Action::from(&data[..]);
-
-                        Ok(Some(action))
+                        Ok(Some(Action::from(&data[..])))
                     }
                     _ => Ok(None)
                 }

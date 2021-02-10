@@ -154,19 +154,15 @@ impl From<&Frame> for Vec<u8> {
             }
         }
 
-        match &frame.opcode {
-            Opcode::Text(s) => {           
-                unsafe {
-                    let len = s.len();
-                    if len > 0 {
-                        let new_len = len + buf.len();
-                        s.as_ptr().copy_to(buf.as_mut_ptr().offset(buf.len() as isize), s.len());
-                        buf.set_len(new_len)
-                    }
+        if let Opcode::Text(s) = &frame.opcode {
+            unsafe {
+                let len = s.len();
+                if len > 0 {
+                    let new_len = len + buf.len();
+                    s.as_ptr().copy_to(buf.as_mut_ptr().offset(buf.len() as isize), s.len());
+                    buf.set_len(new_len)
                 }
-            },
-
-            _ => ()
+            }
         }
 
         buf

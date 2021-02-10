@@ -13,7 +13,7 @@ mod client;
 mod actions;
 pub mod server;
 
-//pub use logger::*;
+pub use logger::*;
 pub use utils::*;
 pub use config::*;
 pub use actions::*;

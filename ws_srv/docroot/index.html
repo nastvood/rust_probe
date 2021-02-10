@@ -34,10 +34,8 @@
         if (!isLogged) {
           let data = {
             "action": "login",
-            "data": {
-              "login": userName,
-              "pass" : ""
-            }
+            "login": userName,
+            "pass" : ""
           }; //pass https
           socket.send(JSON.stringify(data));
         }
@@ -64,7 +62,7 @@
 
         let obj = JSON.parse(e.data);  
 
-        if (obj.hasOwnProperty("from") && obj.hasOwnProperty("message")) {
+        if (obj.hasOwnProperty("type") && obj.type === "respMessage") {
           let rightBadge = "";
           let rightAlert = "";
           let classBadge = "bg-info"
@@ -75,8 +73,9 @@
             classBadge = "bg-primary";
           }
 
-          $("#chat").append('<span class="badge ' + classBadge + ' ' + rightBadge  + '">' + obj.from  + '</span><br/>');
-          $("#chat").append('<p class="text-break ' + rightAlert + '">' + obj.message  + '</p>');
+          let span = $('<span class="badge ' + classBadge + ' ' + rightBadge  + '"></span><br/>').text(obj.from);
+          let p = $('<p class="text-break ' + rightAlert + '"></p>').text(obj.message);
+          $("#chat").append(span, p);
         }
       }
 
@@ -102,9 +101,7 @@
         if (message !== "") {
           let data = {
             "action": "message",
-            "data": {
-              "message": message,
-            }
+            "message": message
           }
 
           socket.send(JSON.stringify(data));

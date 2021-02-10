@@ -84,13 +84,10 @@ impl Server {
     
                                 Ok(n) => {
                                     if n < READ_BUF_SIZE {
-                                        match self.client_addr.get_mut(&token).unwrap().process_packet() {
-                                            Ok(Some(resp)) => {
-                                                for (_token, client) in self.client_addr.iter_mut() {
-                                                    client.stream.write(resp.as_ref())?;
-                                                }
-                                            },
-                                            _ => {}
+                                        if let Ok(Some(resp)) = self.client_addr.get_mut(&token).unwrap().process_packet() {
+                                            for (_token, client) in self.client_addr.iter_mut() {
+                                                client.stream.write(resp.as_ref())?;
+                                            }
                                         }
 
                                         break;

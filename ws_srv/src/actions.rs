@@ -1,5 +1,4 @@
 use serde::{ Deserialize, Serialize };
-use serde_json:: { Result, Value };
 
 use std::convert::From;
 
@@ -15,57 +14,31 @@ pub struct Message {
     pub message: String
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
+#[serde(rename = "respMessage")]
+#[serde(tag = "type", rename_all(serialize = "camelCase"))]
 pub struct RespMessage {
     pub from: String,
     pub message: String
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action")]
 pub enum Action {
+    #[serde(rename(deserialize = "login"))]
     Login(Login),
+    #[serde(rename(deserialize = "message"))]
     Message(Message),
     Error
 }
 
-impl Action {
-    pub fn from_str(data:&str) -> Result<Action> {
+impl From<&str> for Action {
+    fn from(data: &str) -> Self {
         log!("{:?}", data);
 
-        let v:Value = serde_json::from_str(data)?;
-
-        match (&v["action"], &v["data"]) {
-            (Value::String(action), obj) => {
-                log!("{:?} {:?}", action, obj);
-                match action {
-                    action if action == "login" => {
-                        match serde_json::from_value(obj.to_owned()) {
-                            Ok(l) => Ok(Action::Login(l)),
-                             _ => Ok(Action::Error)
-                        }
-                    },
-                    action if action == "message" => {
-                        match serde_json::from_value(obj.to_owned()) {
-                            Ok(m) => Ok(Action::Message(m)),
-                             _ => Ok(Action::Error)
-                        }
-                    },
-                    _ => Ok(Action::Error)
-                }                
-            },
-
-            _ => Ok(Action::Error)
+        match serde_json::from_str(data) {
+            Ok(action) => action,
+            _ => Action::Error
         }
-    }
-}
-
-impl From<&str> for Action {
-    fn from(s: &str) -> Self {
-        match Action::from_str(s) {
-            Ok(v) => v,
-            Err(_) => Action::Error
-        }
-
-        //Action::Error
     }
 }

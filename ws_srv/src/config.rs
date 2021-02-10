@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::str::FromStr;
 
+use crate::logger;
+
 #[derive(Debug)]
 pub struct Config {
   pub port: u16,
@@ -60,10 +62,10 @@ impl Config {
                 ("-p", Some(v)) => conf.port = u16::from_str(&v)?,
                 ("-h", Some(v)) => conf.host = v.clone(),
                 ("--path-log", Some(v)) => { 
-                    super::logger::set(Box::new(super::logger::FileLogger::new(&v[..])));
+                    logger::set(Box::new(logger::FileLogger::new(&v[..])));
                 },
                 ("--disable-log", None) => { 
-                    super::logger::disable();
+                    logger::disable();
                 },
                 _ => {}
             }
