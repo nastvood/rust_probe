@@ -95,7 +95,29 @@ impl ProtoWriter for String {
     fn proto_write(&self, buf: &mut Buffer) {
         buf.write_utf8(self);
     }
-} 
+}
+
+impl<T:ProtoWriter> ProtoWriter for Option<T>  {
+    fn proto_write(&self, buf: &mut Buffer) {
+        match &self {
+            Some(v) => {
+                1u8.proto_write(buf);
+                v.proto_write(buf);
+            },
+            None => 0u8.proto_write(buf)
+        }
+    }
+}
+
+impl<T:ProtoWriter> ProtoWriter for Vec<T>  {
+    fn proto_write(&self, buf: &mut Buffer) {
+        self.len().proto_write(buf);
+
+        for el in self.iter() {
+            el.proto_write(buf);
+        }
+    }
+}   
 
 macro_rules! impl_ToBytes {
     ($($t:ty), +) => {
@@ -174,6 +196,34 @@ impl ProtoReader for () {
     }
 }
 
+impl<T:ProtoReader> ProtoReader for Option<T> {
+    fn proto_read(buf: &mut Buffer) -> Self {
+        match buf.read_u8() {
+            0 => None,
+            1 => {
+                let v = T::proto_read(buf);
+                Some(v)
+            },
+            _ => panic!{"Option can not has value"}
+        }
+    }
+}
+
+impl<T:ProtoReader> ProtoReader for Vec<T> {
+    fn proto_read(buf: &mut Buffer) -> Self {
+        let len = usize::proto_read(buf);
+
+        let mut v = Vec::with_capacity(len);
+
+        if len > 0 {
+            for _i in 0..len {
+                v.push(T::proto_read(buf))
+            }
+        }
+
+        v
+    }
+}
 
 macro_rules! impl_FromBytes {
     ($($t:ty), +) => {
@@ -203,7 +253,7 @@ macro_rules! impl_ProtoReader {
     }
 }
 
-impl_ProtoWrite! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
+impl_ProtoWrite! (u16, u32, u64, usize, f32, f64, i16, i32, i64, &u16, &u32, &u64, &usize, &f32, &f64, &i16, &i32, &i64);
 impl_ProtoReader! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
 
 impl_ToBytes! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
@@ -371,6 +421,50 @@ impl Buffer {
 
         v
     }
+
+    pub fn write_iter<T:ProtoWriter>(&mut self, it:&mut dyn Iterator<Item = T>) {
+        let mut size:usize = 0;
+        size.proto_write(self);
+
+        while let Some(v) = it.next() {
+            size += 1;
+            v.proto_write(self);
+        }
+
+        let old_pos = self.pos;
+
+        self.pos = 0;
+        size.proto_write(self);        
+        self.pos = old_pos;
+    }
+
+    /*pub fn read_iter<T:ProtoReader>(&mut self) -> impl Iterator<Item = T> {
+
+    }*/
+}
+
+use std::iter::FromIterator;
+
+impl<T:ProtoWriter> FromIterator<T> for Buffer {
+    fn from_iter<I: IntoIterator<Item=T>>(iter: I) -> Self {
+        let mut buf = Buffer::new();
+
+        let mut size:usize = 0;
+        size.proto_write(&mut buf);
+       
+        for i in iter {
+            size += 1;
+            i.proto_write(&mut buf);
+        }
+
+        let old_pos = buf.pos;
+
+        buf.pos = 0;
+        size.proto_write(&mut buf);        
+        buf.pos = old_pos;
+
+        buf
+    }
 }
 
 //cargo test -- --nocapture
@@ -461,15 +555,41 @@ mod tests {
     }
 
     #[test]
+    fn from_iter() {
+        let v = vec![1u16, 2, 3, 4];
+
+        let mut b = Buffer::from_iter(v.iter());
+        b.pos = 0;
+
+        assert_eq!(v, Vec::proto_read(&mut b));
+    }
+
+    #[test]
     fn vec() {
         let mut b = Buffer::new();
         
         let v = vec![1, 2, 4, 6];
-        b.write_vec::<u8>(v.as_slice());                  
+        v.proto_write(&mut b);
 
         b.pos = 0;
         
-        assert_eq!(v, b.read_vec::<u8>());
+        assert_eq!(v, Vec::proto_read(&mut b));
+    }
+
+    #[test]
+    fn option() {
+        let mut b = Buffer::new();
+        
+        let v = Some(String::from("Hello"));
+        v.proto_write(&mut b);
+        0u8.proto_write(&mut b);
+
+        b.pos = 0;
+        
+        let v_none:Option<u8> = None;
+
+        assert_eq!(v, Option::proto_read(&mut b));
+        assert_eq!(v_none, Option::proto_read(&mut b));
     }
 
     macro_rules! test_simple_type {
