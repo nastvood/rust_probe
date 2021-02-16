@@ -13,50 +13,12 @@ pub struct Buffer {
     pub endian: Endian,
 }
 
-pub trait ToBytes {
-    fn to_bytes(self, endian: Endian) -> Box<[u8]>;
-}
-
-pub trait FromBytes {
-    fn from_bytes(endian: Endian, s: &[u8]) -> Self;
-}
-
 pub trait ProtoWriter {
     fn proto_write(&self, buf: &mut Buffer);
 }
 
 pub trait ProtoReader {
     fn proto_read(buf: &mut Buffer) -> Self;
-}
-
-impl ToBytes for u8 {
-    fn to_bytes(self, _endian: Endian) -> Box<[u8]> {
-        Box::new([self]) 
-    }
-}
-
-impl ToBytes for i8 {
-    fn to_bytes(self, _endian: Endian) -> Box<[u8]> {
-        Box::new([self as u8]) 
-    }
-}
-
-impl ToBytes for bool {
-    fn to_bytes(self, _endian: Endian) -> Box<[u8]> {
-        Box::new([if self {1}  else {0}]) 
-    }
-}
-
-impl ToBytes for () {
-    fn to_bytes(self, _endian: Endian) -> Box<[u8]> {
-        Box::new([1]) 
-    }
-}
-
-impl ToBytes for &str {
-    fn to_bytes(self, _endian: Endian) -> Box<[u8]> {
-        self.to_owned().into_boxed_str().into_boxed_bytes()
-    }
 }
 
 impl ProtoWriter for u8 {
@@ -119,20 +81,6 @@ impl<T:ProtoWriter> ProtoWriter for Vec<T>  {
     }
 }   
 
-macro_rules! impl_ToBytes {
-    ($($t:ty), +) => {
-        $(impl ToBytes for $t {
-            fn to_bytes(self, endian: Endian) -> Box<[u8]> {
-                if endian == Endian::BigEndian {
-                    Box::new(self.to_be_bytes()) 
-                } else {
-                    Box::new(self.to_le_bytes()) 
-                }
-            }
-        })*
-    }
-}
-
 macro_rules! impl_ProtoWrite {
     ($($t:ty), +) => {
         $(impl ProtoWriter for $t {
@@ -144,30 +92,6 @@ macro_rules! impl_ProtoWrite {
                 }
             }
         })*
-    }
-}
-
-impl FromBytes for u8 {
-    fn from_bytes(_endian: Endian, s: &[u8]) -> Self {
-        s[0]
-    }
-}
-
-impl FromBytes for i8 {
-    fn from_bytes(_endian: Endian, s: &[u8]) -> Self {
-        s[0] as i8
-    }
-}
-
-impl FromBytes for bool {
-    fn from_bytes(_endian: Endian, s: &[u8]) -> Self {
-        if s[0] == 0 {false} else {true}
-    }
-}
-
-impl FromBytes for () {
-    fn from_bytes(_endian: Endian, _s: &[u8]) -> Self {
-        ()
     }
 }
 
@@ -225,20 +149,6 @@ impl<T:ProtoReader> ProtoReader for Vec<T> {
     }
 }
 
-macro_rules! impl_FromBytes {
-    ($($t:ty), +) => {
-        $(impl FromBytes for $t {
-            fn from_bytes(endian: Endian, s: &[u8]) -> Self {
-                if endian == Endian::BigEndian {            
-                    Self::from_be_bytes(s.try_into().unwrap())
-                } else {
-                    Self::from_le_bytes(s.try_into().unwrap())
-                }
-            }
-        })*
-    }
-}
-
 macro_rules! impl_ProtoReader {
     ($($t:ty), +) => {
         $(impl ProtoReader for $t {
@@ -256,18 +166,9 @@ macro_rules! impl_ProtoReader {
 impl_ProtoWrite! (u16, u32, u64, usize, f32, f64, i16, i32, i64, &u16, &u32, &u64, &usize, &f32, &f64, &i16, &i32, &i64);
 impl_ProtoReader! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
 
-impl_ToBytes! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
-impl_FromBytes! (u16, u32, u64, usize, f32, f64, i16, i32, i64);
-
 impl ProtoReader for String {
     fn proto_read(buf: &mut Buffer) -> Self {
         String::from(buf.read_utf8())
-    }
-}
-
-impl ToBytes for char {
-    fn to_bytes(self, endian: Endian) -> Box<[u8]> {
-        (self as u32).to_bytes(endian)
     }
 }
 
@@ -278,12 +179,6 @@ fn char_from_u32(i:u32) -> char {
         panic!("char_from_u32 ({})", i)
     } else {
         unsafe { std::mem::transmute(i) }
-    }
-}
-
-impl FromBytes for char {
-    fn from_bytes(endian: Endian, s: &[u8]) -> Self {
-        char_from_u32(u32::from_bytes(endian, s))
     }
 }
 
@@ -315,16 +210,6 @@ impl Buffer {
             pos: 0,
             endian: Endian::BigEndian
         }
-    }
-
-    pub fn write<T:ToBytes>(&mut self, v: T) {
-        let bytes = v.to_bytes(self.endian);
-
-        self.write_slice_u8(&bytes);
-    }
-
-    pub fn read<T:FromBytes>(&mut self) -> T {
-       T::from_bytes(self.endian, self.read_slice_u8(std::mem::size_of::<T>())) 
     }
 
     fn write_u8(&mut self, v:&u8) {        
@@ -376,7 +261,7 @@ impl Buffer {
             self.data.reserve(self.pos + str_len + std::mem::size_of::<usize>() - self.data.len());//?
         }
 
-        self.write::<usize>(str_len);
+        str_len.proto_write(self);
 
         let mut add_len = 0;
         if self.data.len() < self.pos + str_len {
@@ -397,29 +282,9 @@ impl Buffer {
 
 
     pub fn read_utf8(&mut self) -> &str {
-        let len = self.read::<usize>();
+        let len = usize::proto_read(self);
 
         std::str::from_utf8(self.read_slice_u8(len)).unwrap()
-    }
-
-    pub fn write_vec<T:ToBytes + Copy>(&mut self, xs: &[T]) {
-        self.write::<usize>(xs.len());
-        
-        for x in xs.iter() {
-            self.write::<T>(*x);
-        }
-    }
-
-
-    pub fn read_vec<T:FromBytes + Copy>(&mut self) -> Vec<T> {
-        let len = self.read::<usize>();
-        let mut v = Vec::with_capacity(len);
-        
-        for _ in 0..len {
-            v.push(self.read::<T>())
-        }
-
-        v
     }
 
     pub fn write_iter<T:ProtoWriter>(&mut self, it:&mut dyn Iterator<Item = T>) {
@@ -518,17 +383,6 @@ mod tests {
 
     #[test]
     fn measure() {
-        let d0 = || {
-            let mut b = Buffer::new();
-            let start = Instant::now();
-            b.write::<&str>("123456789");
-            b.write::<&str>("123456789");
-            b.write::<&str>("123456789");
-            b.write::<&str>("123456789");
-            b.write::<&str>("123456789");
-            start.elapsed()
-        };
-
         let d1 = || {
             let mut b = Buffer::new();
             let start = Instant::now();
@@ -551,7 +405,7 @@ mod tests {
             start.elapsed()
         };
 
-        println!("\nTime elapsed: \n\tb.write::<&str> is: {:?}\n\tb.write_utf8 is: {:?}\n\tproto_write is: {:?}\n", d0(), d1(), d2())        
+        println!("\nTime elapsed: \n\tb.write_utf8 is: {:?}\n\tproto_write is: {:?}\n", d1(), d2())        
     }
 
     #[test]
@@ -603,7 +457,7 @@ mod tests {
 
                 b.pos = std::mem::size_of::<$t>();
 
-                assert_eq!($v1, b.read::<$t>());
+                assert_eq!($v1, <$t>::proto_read(&mut b));
 
                 b.pos = $offset;
                 $v.proto_write(&mut b);
@@ -643,7 +497,7 @@ mod tests {
         assert_eq!("[DIY家具] 収納椅子をつくる", b.read_utf8());
 
         b.pos = 11 + std::mem::size_of::<usize>();
-        b.write::<u8>(0x5f);
+        0x5fu8.proto_write(&mut b);
 
         b.pos = 0;
 
